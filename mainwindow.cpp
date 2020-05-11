@@ -47,11 +47,11 @@ QStringList MainWindow::getVersionInfo(const QString& which)
     QString url = "https://dpoge.github.io/VersionSwitcher/" + which + ".html";
     QString kernel = QSysInfo::kernelType().toLower();
     QMessageBox msgBox;
-    if(kernel.contains("mac")) // if user is running mac
+    if(kernel == "darwin") // if user is running mac
     {
         url = "https://dpoge.github.io/VersionSwitcher/" + which + "-mac.html";
     }
-    else if(!kernel.contains("windows") && kernel != "linux") // not running windows, mac, or linux (prob not even possible, but better safe than sorry)
+    else if(kernel != "winnt" && kernel != "linux") // not running windows, mac, or linux (prob not even possible, but better safe than sorry)
     {
         msgBox.setIcon(QMessageBox::Warning);
         msgBox.setWindowTitle("Warning");
@@ -130,8 +130,8 @@ void MainWindow::unzip(const std::string& file, const std::string& destination)
                     {
                         if(!mz_zip_reader_file_stat(&zip_archive, i, &file_stat)) continue;
                         if(mz_zip_reader_is_file_a_directory(&zip_archive, i)) continue;
-                        std::string destFile = fs::relative(destination + "/" + file_stat.m_filename);
-                        QDir newDir = QDir(QString::fromStdString(fs::path(destFile).parent_path()));
+                        std::string destFile = fs::relative(destination + "/" + file_stat.m_filename).string();
+                        QDir newDir = QDir(QString::fromStdString(fs::path(destFile).parent_path().string()));
                         if(!newDir.exists()) newDir.mkpath(".");
                         mz_zip_reader_extract_to_file(&zip_archive, i, destFile.c_str(), 0);
                     }
@@ -154,9 +154,19 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
+    // get versions, check if it actually worked
+    const QStringList versionInfo = getVersionInfo("versions");
+    if(versionInfo.size() == 0)
+    {
+        QMessageBox msgBox;
+        msgBox.setWindowTitle("Error");
+        msgBox.setText("Error occurred getting the version info: length was zero. You may not have OpenSSL installed.");
+        msgBox.exec();
+        parent->close();
+    }
+    // do ui stuff
     setWindowIcon(QIcon(":/icon.ico"));
     ui->setupUi(this);
-    const QStringList versionInfo = getVersionInfo("versions");
     ui->versionSelect->addItems(versionInfo);
     // disable resizing
     this->statusBar()->setSizeGripEnabled(false);
@@ -173,6 +183,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::openBtd6Folder()
 {
+    // get a directory to start in, if possible
     QString initialDir;
     const QString dirs[3] = {"C:/Program Files (x86)/Steam/steamapps/common/BloonsTD6", "~/Library/Application Support/Steam/SteamApps/common/BloonsTD6", "~/.steam/steam/steamapps/common/BloonsTD6"}; // should be default btd6 directory for windows, mac, and linux (in that order)
     for(const auto& dir : dirs)
@@ -180,6 +191,7 @@ void MainWindow::openBtd6Folder()
         if(QDir(dir).exists())
             initialDir = dir;
     }
+    // open up file dialog, make versions folder in whatever folder you selected assuming it's valid
     QString dir = QFileDialog::getExistingDirectory(this, tr("Choose BTD6 directory"), initialDir, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
     ui->btd6Folder->setText(dir);
     if(dir.toLower().contains("steamapps/common/bloonstd6") && QDir(dir + "/BloonsTD6_Data").exists())
@@ -198,27 +210,36 @@ void MainWindow::openBtd6Folder()
 QString downloads = "downloads";
 void MainWindow::switchVersion()
 {
+    QMessageBox msgBox;
     const QString directory = ui->btd6Folder->text();
     if(directory != "No folder selected!" && ui->btd6Folder->styleSheet() != "QWidget { background-color: red; }") // if user selected a valid directory
     {
         const QString version = ui->versionSelect->currentText();
         const QString zipPath = directory + "/versions/" + version + ".zip";
         const QStringList versionLinks = getVersionInfo(downloads);
-        if(!QFileInfo(zipPath).exists())
+        if(versionLinks.size() == 0)
         {
-            ui->console->append("Downloading version " + version + "...");
-            downloadFile(versionLinks.at(ui->versionSelect->currentIndex()), zipPath);
+            msgBox.setWindowTitle("Error");
+            msgBox.setText("Error occurred getting the version downloads: length was zero");
+            msgBox.exec();
         }
         else
         {
-            ui->console->append("Zip for " + version + " exists!");
+            if(!QFileInfo(zipPath).exists())
+            {
+                ui->console->append("Downloading version " + version + "...");
+                downloadFile(versionLinks.at(ui->versionSelect->currentIndex()), zipPath);
+            }
+            else
+            {
+                ui->console->append("Zip for " + version + " exists!");
+            }
+            ui->console->append("Extracting...");
+            unzip(zipPath.toStdString(), directory.toStdString());
+            ui->console->append("Done!\n");
         }
-        ui->console->append("Extracting...");
-        unzip(zipPath.toStdString(), directory.toStdString());
-        ui->console->append("Done!\n");
         return;
     }
-    QMessageBox msgBox;
     msgBox.setIcon(QMessageBox::Warning);
     msgBox.setWindowTitle("Warning");
     msgBox.setText("You haven't selected your BTD6 folder or the selected folder is invalid, please fix that!");
