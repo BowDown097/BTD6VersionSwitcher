@@ -22,6 +22,9 @@ private slots:
     void joinDiscord();
     void downloadFile(const QString& url, const QString& fileLocation);
     void unzip(const std::string& file, const std::string& destination);
+    void refreshVersions();
+    void clearVersionCache();
+    void moddedVersions();
 
 private:
     Ui::MainWindow *ui;

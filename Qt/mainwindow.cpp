@@ -16,6 +16,7 @@
 #include <QThread>
 #include <QException>
 #include <QSaveFile>
+#include <QShortcut>
 
 namespace fs = std::filesystem;
 
@@ -46,17 +47,13 @@ QStringList MainWindow::getVersionInfo(const QString& which)
     // resolve url
     QString url = "https://dpoge.github.io/VersionSwitcher/" + which + ".html";
     QString kernel = QSysInfo::kernelType().toLower();
-    QMessageBox msgBox;
-    if(kernel == "darwin") // if user is running mac
+    if(kernel.contains("mac")) // if user is running mac
     {
         url = "https://dpoge.github.io/VersionSwitcher/" + which + "-mac.html";
     }
-    else if(kernel != "winnt" && kernel != "linux") // not running windows, mac, or linux (prob not even possible, but better safe than sorry)
+    else if(!kernel.contains("windows") && kernel != "linux") // not running windows, mac, or linux (prob not even possible, but better safe than sorry)
     {
-        msgBox.setIcon(QMessageBox::Warning);
-        msgBox.setWindowTitle("Warning");
-        msgBox.setText("Your kernel, " + kernel + ", is not supported. However, the program will attempt to use the Windows versions. This may not work.");
-        msgBox.exec();
+        QMessageBox::warning(this, "Warning", "Your kernel, " + kernel + ", is not supported. However, the program will attempt to use the Windows versions. This may not work.");
     }
     // write versions from github.io page to string
     QNetworkAccessManager* manager = new QNetworkAccessManager();
@@ -102,11 +99,7 @@ void MainWindow::downloadFile(const QString& url, const QString& fileLocation)
     }
     catch (const QException& e)
     {
-        QMessageBox msgBox;
-        msgBox.setIcon(QMessageBox::Warning);
-        msgBox.setWindowTitle("Error");
-        msgBox.setText("Error occurred downloading the file: " + QString::fromUtf8(e.what()));
-        msgBox.exec();
+        QMessageBox::warning(this, "Error", "Error occurred downloading the file: " + QString::fromUtf8(e.what()));
     }
 }
 
@@ -114,39 +107,45 @@ void MainWindow::unzip(const std::string& file, const std::string& destination)
 {
     try
     {
-        mz_zip_archive zip_archive;
-        memset(&zip_archive, 0, sizeof(zip_archive));
-
-        auto status = mz_zip_reader_init_file(&zip_archive, file.c_str(), 0);
-        if(status)
+        QThread* thread = QThread::create([&]
         {
-            int fileCount = (int)mz_zip_reader_get_num_files(&zip_archive);
-            if(fileCount != 0)
+            mz_zip_archive zip_archive;
+            memset(&zip_archive, 0, sizeof(zip_archive));
+
+            auto status = mz_zip_reader_init_file(&zip_archive, file.c_str(), 0);
+            if(status)
             {
-                mz_zip_archive_file_stat file_stat;
-                if(mz_zip_reader_file_stat(&zip_archive, 0, &file_stat))
+                int fileCount = (int)mz_zip_reader_get_num_files(&zip_archive);
+                if(fileCount != 0)
                 {
-                    for(int i = 0; i < fileCount; i++)
+                    mz_zip_archive_file_stat file_stat;
+                    if(mz_zip_reader_file_stat(&zip_archive, 0, &file_stat))
                     {
-                        if(!mz_zip_reader_file_stat(&zip_archive, i, &file_stat)) continue;
-                        if(mz_zip_reader_is_file_a_directory(&zip_archive, i)) continue;
-                        std::string destFile = fs::relative(destination + "/" + file_stat.m_filename).string();
-                        QDir newDir = QDir(QString::fromStdString(fs::path(destFile).parent_path().string()));
-                        if(!newDir.exists()) newDir.mkpath(".");
-                        mz_zip_reader_extract_to_file(&zip_archive, i, destFile.c_str(), 0);
+                        for(int i = 0; i < fileCount; i++)
+                        {
+                            if(!mz_zip_reader_file_stat(&zip_archive, i, &file_stat)) continue;
+                            if(mz_zip_reader_is_file_a_directory(&zip_archive, i)) continue;
+                            std::string destFile = fs::relative(destination + "/" + file_stat.m_filename);
+                            QDir newDir = QDir(QString::fromStdString(fs::path(destFile).parent_path()));
+                            if(!newDir.exists()) newDir.mkpath(".");
+                            mz_zip_reader_extract_to_file(&zip_archive, i, destFile.c_str(), 0);
+                            qApp->processEvents();
+                        }
                     }
                 }
             }
+            mz_zip_reader_end(&zip_archive);
+        });
+        thread->start();
+        while(thread->isRunning())
+        {
+            sleep_ms(30);
+            qApp->processEvents();
         }
-        mz_zip_reader_end(&zip_archive);
     }
     catch (const QException& e)
     {
-        QMessageBox msgBox;
-        msgBox.setIcon(QMessageBox::Warning);
-        msgBox.setWindowTitle("Error");
-        msgBox.setText("Error occurred unzipping the file: " + QString::fromUtf8(e.what()));
-        msgBox.exec();
+        QMessageBox::warning(this, "Warning", "Error occurred unzipping the file: " + QString::fromUtf8(e.what()));
     }
 }
 
@@ -154,26 +153,24 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
-    // get versions, check if it actually worked
-    const QStringList versionInfo = getVersionInfo("versions");
-    if(versionInfo.size() == 0)
-    {
-        QMessageBox msgBox;
-        msgBox.setWindowTitle("Error");
-        msgBox.setText("Error occurred getting the version info: length was zero. You may not have OpenSSL installed.");
-        msgBox.exec();
-        parent->close();
-    }
-    // do ui stuff
     setWindowIcon(QIcon(":/icon.ico"));
     ui->setupUi(this);
+    const QStringList versionInfo = getVersionInfo("versions");
     ui->versionSelect->addItems(versionInfo);
     // disable resizing
     this->statusBar()->setSizeGripEnabled(false);
     this->setFixedSize(QSize(800, 600));
+    // ui shit
     connect(ui->openFolderBtn, SIGNAL(clicked()), this, SLOT(openBtd6Folder()));
     connect(ui->switchBtn, SIGNAL(clicked()), this, SLOT(switchVersion()));
     connect(ui->discordBtn, SIGNAL(clicked()), this, SLOT(joinDiscord()));
+    // hotkeys
+    QShortcut* refresh = new QShortcut(QKeySequence(Qt::Key_F5), this);
+    QShortcut* clear = new QShortcut(QKeySequence(Qt::Key_Delete), this);
+    QShortcut* modded = new QShortcut(QKeySequence(Qt::Key_M), this);
+    QObject::connect(refresh, &QShortcut::activated, this, &MainWindow::refreshVersions);
+    QObject::connect(clear, &QShortcut::activated, this, &MainWindow::clearVersionCache);
+    QObject::connect(modded, &QShortcut::activated, this, &MainWindow::moddedVersions);
 }
 
 MainWindow::~MainWindow()
@@ -183,7 +180,6 @@ MainWindow::~MainWindow()
 
 void MainWindow::openBtd6Folder()
 {
-    // get a directory to start in, if possible
     QString initialDir;
     const QString dirs[3] = {"C:/Program Files (x86)/Steam/steamapps/common/BloonsTD6", "~/Library/Application Support/Steam/SteamApps/common/BloonsTD6", "~/.steam/steam/steamapps/common/BloonsTD6"}; // should be default btd6 directory for windows, mac, and linux (in that order)
     for(const auto& dir : dirs)
@@ -191,7 +187,6 @@ void MainWindow::openBtd6Folder()
         if(QDir(dir).exists())
             initialDir = dir;
     }
-    // open up file dialog, make versions folder in whatever folder you selected assuming it's valid
     QString dir = QFileDialog::getExistingDirectory(this, tr("Choose BTD6 directory"), initialDir, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
     ui->btd6Folder->setText(dir);
     if(dir.toLower().contains("steamapps/common/bloonstd6") && QDir(dir + "/BloonsTD6_Data").exists())
@@ -210,43 +205,74 @@ void MainWindow::openBtd6Folder()
 QString downloads = "downloads";
 void MainWindow::switchVersion()
 {
-    QMessageBox msgBox;
     const QString directory = ui->btd6Folder->text();
     if(directory != "No folder selected!" && ui->btd6Folder->styleSheet() != "QWidget { background-color: red; }") // if user selected a valid directory
     {
         const QString version = ui->versionSelect->currentText();
         const QString zipPath = directory + "/versions/" + version + ".zip";
         const QStringList versionLinks = getVersionInfo(downloads);
-        if(versionLinks.size() == 0)
+        if(!QFileInfo(zipPath).exists())
         {
-            msgBox.setWindowTitle("Error");
-            msgBox.setText("Error occurred getting the version downloads: length was zero");
-            msgBox.exec();
+            ui->console->append("Downloading version " + version + "...");
+            downloadFile(versionLinks.at(ui->versionSelect->currentIndex()), zipPath);
         }
         else
         {
-            if(!QFileInfo(zipPath).exists())
-            {
-                ui->console->append("Downloading version " + version + "...");
-                downloadFile(versionLinks.at(ui->versionSelect->currentIndex()), zipPath);
-            }
-            else
-            {
-                ui->console->append("Zip for " + version + " exists!");
-            }
-            ui->console->append("Extracting...");
-            unzip(zipPath.toStdString(), directory.toStdString());
-            ui->console->append("Done!\n");
+            ui->console->append("Zip for " + version + " exists!");
         }
+        ui->console->append("Extracting...");
+        unzip(zipPath.toStdString(), directory.toStdString());
+        ui->console->append("Done!\n");
         return;
     }
-    msgBox.setIcon(QMessageBox::Warning);
-    msgBox.setWindowTitle("Warning");
-    msgBox.setText("You haven't selected your BTD6 folder or the selected folder is invalid, please fix that!");
-    msgBox.exec();
+    QMessageBox::warning(this, "Warning", "You haven't selected your BTD6 folder or the selected folder is invalid, please fix that!");
 }
 
 void MainWindow::joinDiscord()
 {
     QDesktopServices::openUrl(QUrl("https://discord.gg/MmnUCWV"));
+}
+
+void MainWindow::refreshVersions()
+{
+    if(QMessageBox::question(this, "Refresh versions list?", "F5 was pressed", QMessageBox::Yes| QMessageBox::No) == QMessageBox::Yes)
+    {
+        const QStringList versionsOverride = getVersionInfo("versions");
+        ui->versionSelect->clear();
+        ui->versionSelect->addItems(versionsOverride);
+        QMessageBox::information(this, "Success", "Versions list was refreshed!");
+    }
+}
+
+void MainWindow::clearVersionCache()
+{
+    if(QMessageBox::question(this, "Clear versions folder?", "Delete was pressed", QMessageBox::Yes| QMessageBox::No) == QMessageBox::Yes)
+    {
+        const QString path = ui->btd6Folder->text() + "/versions";
+        QDir dir(path);
+        if(dir.exists())
+        {
+            dir.setNameFilters(QStringList() << "*.*");
+            dir.setFilter(QDir::Files);
+            foreach(QString file, dir.entryList())
+                dir.remove(file);
+            QMessageBox::information(this, "Success", "Versions folder has been cleared!");
+        }
+        else
+        {
+            QMessageBox::warning(this, "Warning", "You haven't selected your BTD6 folder or the selected folder is invalid, please fix that!");
+        }
+    }
+}
+
+void MainWindow::moddedVersions()
+{
+    if(QMessageBox::question(this, "Use modded versions list?", "M was pressed", QMessageBox::Yes| QMessageBox::No) == QMessageBox::Yes)
+    {
+        const QStringList versionsOverride = getVersionInfo("versions-modded");
+        downloads = "downloads-modded";
+        ui->versionSelect->clear();
+        ui->versionSelect->addItems(versionsOverride);
+        QMessageBox::information(this, "Success", "Versions list was refreshed!");
+    }
 }
