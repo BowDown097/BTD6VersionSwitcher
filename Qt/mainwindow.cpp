@@ -3,6 +3,9 @@
 #include "miniz.h"
 #include <sstream>
 #include <filesystem>
+#include <pwd.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <QFileDialog>
 #include <QDir>
 #include <QSysInfo>
@@ -180,13 +183,22 @@ MainWindow::~MainWindow()
 
 void MainWindow::openBtd6Folder()
 {
+    // attempt to make initial directory
     QString initialDir;
-    const QString dirs[3] = {"C:/Program Files (x86)/Steam/steamapps/common/BloonsTD6", "~/Library/Application Support/Steam/SteamApps/common/BloonsTD6", "~/.steam/steam/steamapps/common/BloonsTD6"}; // should be default btd6 directory for windows, mac, and linux (in that order)
-    for(const auto& dir : dirs)
-    {
-        if(QDir(dir).exists())
-            initialDir = dir;
-    }
+#ifdef WIN32
+    if(QDir("C:/Program Files (x86)/Steam/steamapps/common/BloonsTD6").exists())
+        initialDir = "C:/Program Files (x86)/Steam/steamapps/common/BloonsTD6";
+#elif _POSIX_C_SOURCE >= 199309L
+    // get home directory
+    QString home;
+    if((home = getenv("HOME")) == NULL)
+        home = getpwuid(getuid())->pw_dir;
+    // see if btd6 dir exists
+    if(QDir(home + "/.steam/steam/steamapps/common/BloonsTD6").exists())
+        initialDir = home + "/.steam/steam/steamapps/common/BloonsTD6";
+#endif // sorry mac users nothing for you
+
+    // create folder dialog, set as dir
     QString dir = QFileDialog::getExistingDirectory(this, tr("Choose BTD6 directory"), initialDir, QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
     ui->btd6Folder->setText(dir);
     if(dir.toLower().contains("steamapps/common/bloonstd6") && QDir(dir + "/BloonsTD6_Data").exists())
