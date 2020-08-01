@@ -1,3 +1,5 @@
+<h2>.NET core is required to run this properly, for now. Get it from https://dotnet.microsoft.com/download/dotnet-core</h2>
+
 # BTD6VersionSwitcher
 A tool that allows you to switch between BTD6 versions.
 <p align="center">
